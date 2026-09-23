@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { ShoppingBag, User as UserIcon, Shield, Package, LogOut, Sparkles, ChevronDown } from 'lucide-react';
+import { ShoppingBag, Shield, Package, LogOut, Sparkles, ChevronDown } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { GoogleSignIn } from './GoogleSignIn';
 import { useCart } from '../context/CartContext';
 
 interface NavbarProps {
@@ -18,7 +19,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   selectedCategory,
   onSelectCategory,
 }) => {
-  const { user, loginDemo, logout } = useAuth();
+  const { user, logout } = useAuth();
   const { cartCount, setIsCartOpen } = useCart();
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
@@ -119,13 +120,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
                 </button>
               ) : (
-                <button
-                  onClick={() => loginDemo('customer')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-sm transition-colors"
-                >
-                  <UserIcon className="w-3.5 h-3.5" />
-                  <span>Sign In</span>
-                </button>
+                <GoogleSignIn />
               )}
 
               {/* Persona Switcher Dropdown */}
@@ -140,32 +135,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <span className="inline-block mt-1 px-2 py-0.5 text-[9px] font-bold uppercase rounded bg-slate-100 text-slate-700">
                       Role: {user?.role}
                     </span>
-                  </div>
-
-                  <div className="px-2 py-1">
-                    <p className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      Switch Role (Evaluation)
-                    </p>
-                    <button
-                      onClick={() => {
-                        loginDemo('customer');
-                        setDropdownOpen(false);
-                      }}
-                      className="w-full text-left px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 rounded-lg flex items-center justify-between"
-                    >
-                      <span>Customer Mode (Sarah)</span>
-                      {user?.role === 'customer' && <span className="text-[10px] text-emerald-600 font-bold">Active</span>}
-                    </button>
-                    <button
-                      onClick={() => {
-                        loginDemo('admin');
-                        setDropdownOpen(false);
-                      }}
-                      className="w-full text-left px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-purple-50 hover:text-purple-800 rounded-lg flex items-center justify-between"
-                    >
-                      <span>Admin Mode (Full RBAC)</span>
-                      {user?.role === 'admin' && <span className="text-[10px] text-purple-600 font-bold">Active</span>}
-                    </button>
                   </div>
 
                   <div className="border-t border-slate-100 mt-1 pt-1 px-2">

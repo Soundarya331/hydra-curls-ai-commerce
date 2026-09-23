@@ -4,7 +4,7 @@ const API_BASE = '/api';
 
 export const api = {
   // Auth
-  async loginGoogle(data: { id_token?: string; mock_email?: string; mock_name?: string; mock_role?: string; mock_avatar?: string }) {
+  async loginGoogle(data: { id_token: string }) {
     const res = await fetch(`${API_BASE}/auth/google`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -124,6 +124,12 @@ export const api = {
     return res.json() as Promise<Order>;
   },
 
+  async cancelCheckout(orderId: number, token: string) {
+    const res = await fetch(`${API_BASE}/checkout/cancel/${orderId}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Could not cancel checkout');
+    return res.json() as Promise<Order>;
+  },
+
   // AI Support Agent
   async sendAiMessage(message: string, history: { role: string; content: string }[], token?: string) {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -137,7 +143,7 @@ export const api = {
         conversation_history: history,
       }),
     });
-    if (!res.ok) throw new Error('AI Agent error');
-    return res.json() as Promise<{ response: string; tools_called: string[] }>;
+    if (!res.ok) throw new Error((await res.json()).detail || 'AI support is unavailable');
+    return res.json() as Promise<{ response: string; tools_called: string[]; mode: 'basic' | 'llm' }>;
   },
 };

@@ -67,10 +67,12 @@ def update_order_status(
     """
     Admin-only endpoint: Update order status (pending, paid, processing, shipped, cancelled).
     """
-    order = db.query(Order).filter(Order.id == order_id).first()
+    order = db.query(Order).filter(Order.id == order_id).with_for_update().first()
     if not order:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
-    
+    allowed = {'paid': {'processing', 'shipped'}, 'processing': {'shipped'}}
+    if status_update.status != order.status and status_update.status not in allowed.get(order.status, set()):
+        raise HTTPException(409, 'Only paid orders can advance to processing or shipped. Payment state is managed by Stripe.')
     order.status = status_update.status
     db.commit()
     db.refresh(order)

@@ -33,7 +33,7 @@ flowchart TD
     end
 
     subgraph DataTier["Data Tier"]
-        DB[(PostgreSQL / SQLite Database)]
+        DB[(PostgreSQL)]
         UsersTable[("Users Table")]
         ProductsTable[("Products Table")]
         OrdersTable[("Orders & Items Table")]
@@ -82,7 +82,7 @@ flowchart TD
 3. **Backend Verification**: Frontend transmits `id_token` to `POST /api/auth/google`.
 4. **FastAPI Verification**: FastAPI uses `google-auth` to fetch Google's public JWKS keys and verify signature, audience (`GOOGLE_CLIENT_ID`), and expiry.
 5. **Database Upsert**: If user email is new, a record is created in `users` with default role `customer`. If existing, profile is updated.
-6. **JWT Issuance**: FastAPI issues a signed HMAC-SHA256 JWT containing `sub` (user_id), `email`, and `role`.
+6. **JWT Issuance**: FastAPI issues a signed HMAC-SHA256 JWT containing only `sub` (user_id). Protected requests load current role and email from PostgreSQL.
 7. **Protected API Access**: Client passes `Authorization: Bearer <jwt>` with every request. FastAPI dependency `require_admin` ensures only admins can access administrative routes.
 
 ---
@@ -99,8 +99,7 @@ sequenceDiagram
 
     Customer->>Frontend: Click "Proceed to Stripe Checkout"
     Frontend->>Backend: POST /api/checkout/create-session (Items, Quantities)
-    Backend->>DB: Check Product Stock (Ensure stock_quantity >= requested)
-    Backend->>DB: Create Order (Status: 'pending') + OrderItems
+    Backend->>DB: Reserve stock with conditional UPDATE; create pending order and item snapshots in one transaction
     Backend->>Stripe: stripe.checkout.Session.create(...)
     Stripe-->>Backend: Return Checkout Session URL & ID
     Backend-->>Frontend: Return session_id & checkout_url
@@ -108,8 +107,8 @@ sequenceDiagram
     Customer->>Stripe: Enter Card details and complete payment
     Stripe->>Backend: POST /api/webhooks/stripe (Event: checkout.session.completed)
     Note over Backend: Verify Stripe Webhook Signature
-    Backend->>DB: UPDATE Order SET status='paid'
-    Backend->>DB: ATOMIC DECREMENT Product stock_quantity
+    Backend->>DB: Verify session, order, amount, currency, test mode and paid state
+    Backend->>DB: Set paid_at and paid status; don't subtract the already reserved stock again
     Stripe-->>Frontend: Redirect to /checkout/success
     Frontend->>Customer: Display Order Confirmation & Success Modal
 ```

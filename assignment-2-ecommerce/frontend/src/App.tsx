@@ -9,7 +9,9 @@ import { CartDrawer } from './components/CartDrawer';
 import { OrderHistoryModal } from './components/OrderHistoryModal';
 import { AdminModal } from './components/AdminModal';
 import { AiChatWidget } from './components/AiChatWidget';
-import { MockStripeCheckout } from './components/MockStripeCheckout';
+import { useAuth } from './context/AuthContext';
+import { useCart } from './context/CartContext';
+import { Button } from './components/ui/button';
 import { CheckoutSuccessModal } from './components/CheckoutSuccessModal';
 
 export const App: React.FC = () => {
@@ -24,15 +26,30 @@ export const App: React.FC = () => {
   const [isOrdersOpen, setIsOrdersOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
 
-  // Stripe Checkout states
-  const [activeCheckoutData, setActiveCheckoutData] = useState<{
-    order_id: number;
-    session_id: string;
-    checkout_url: string;
-    total_amount_cents: number;
-  } | null>(null);
-
+  const { token, user, isLoading } = useAuth();
+  const { clearCart } = useCart();
+  const [checkoutMessage, setCheckoutMessage] = useState('');
   const [confirmedOrder, setConfirmedOrder] = useState<Order | null>(null);
+
+  useEffect(() => {
+    if (isLoading || !window.location.pathname.startsWith('/checkout/')) return;
+    if (!token) { setCheckoutMessage('Sign in with Google to view your checkout result.'); return; }
+    const params = new URLSearchParams(window.location.search);
+    const orderId = Number(params.get('order_id'));
+    if (!Number.isInteger(orderId) || orderId <= 0) { setCheckoutMessage('Invalid checkout return URL.'); return; }
+    const cancelled = window.location.pathname === '/checkout/cancel';
+    const sessionId = params.get('session_id');
+    if (!cancelled && !sessionId) { setCheckoutMessage('Missing checkout session.'); return; }
+    setCheckoutMessage('Checking your payment status...');
+    const request = cancelled ? api.cancelCheckout(orderId, token) : api.confirmPayment(orderId, token, sessionId!);
+    request.then(order => {
+      if (['paid', 'processing', 'shipped'].includes(order.status)) {
+        setConfirmedOrder(order); clearCart(); setCheckoutMessage('');
+      } else { setCheckoutMessage('Checkout cancelled. Your cart is saved.'); }
+      window.history.replaceState({}, '', '/');
+      void fetchCatalog();
+    }).catch(error => setCheckoutMessage(error.message + ' Refresh to retry, or check My Orders.'));
+  }, [token, isLoading]);
 
   const fetchCatalog = async () => {
     setLoading(true);
@@ -44,7 +61,7 @@ export const App: React.FC = () => {
       });
       setProducts(data);
     } catch (err) {
-      console.error('Failed to load products:', err);
+      setCheckoutMessage('Could not load products. Please refresh to retry.');
     } finally {
       setLoading(false);
     }
@@ -52,7 +69,7 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     fetchCatalog();
-  }, [selectedCategory, inStockOnly]);
+  }, [selectedCategory, inStockOnly, searchQuery]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,24 +85,24 @@ export const App: React.FC = () => {
         onSelectCategory={setSelectedCategory}
       />
 
+      {checkoutMessage && <div role="status" className="bg-amber-50 p-4 text-center text-sm text-amber-900">{checkoutMessage}</div>}
       {/* Hero Showcase Section */}
       <section className="relative overflow-hidden bg-gradient-to-b from-white to-slate-100/60 border-b border-slate-200/80 pt-8 pb-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto text-center">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold mb-4 shadow-sm">
             <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-            <span>AI Full-Stack Architecture Demo</span>
+            <span>Welcome to NovaStore</span>
           </div>
 
           <h1 className="text-3xl sm:text-5xl font-black tracking-tight text-slate-900 max-w-3xl mx-auto leading-tight">
-            Production-Ready E-Commerce with{' '}
+            Everyday technology with{' '}
             <span className="bg-gradient-to-r from-emerald-600 to-teal-500 bg-clip-text text-transparent">
-              AI Support & Stripe
+              help when you need it
             </span>
           </h1>
 
           <p className="mt-3 text-sm sm:text-base text-slate-600 max-w-2xl mx-auto">
-            Full end-to-end integration: React & Tailwind frontend, Python FastAPI backend,
-            Google OAuth, Stripe payment webhooks, and a LangChain AI support agent grounded in live database data.
+            Explore audio, accessories, displays, and wearables. Get answers about products and track your orders with our support assistant.
           </p>
 
           {/* Architecture Badges */}
@@ -152,7 +169,7 @@ export const App: React.FC = () => {
             <Search className="w-12 h-12 mx-auto mb-2 text-slate-300 stroke-[1.5]" />
             <h3 className="text-sm font-bold text-slate-800">No products found</h3>
             <p className="text-xs text-slate-500 mt-1">Try resetting the category filter or search query.</p>
-            <button
+            <Button
               onClick={() => {
                 setSelectedCategory('All');
                 setSearchQuery('');
@@ -161,7 +178,7 @@ export const App: React.FC = () => {
               className="mt-4 px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-semibold hover:bg-emerald-600 transition-colors"
             >
               Reset Filters
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -189,21 +206,7 @@ export const App: React.FC = () => {
       {/* Modals & Drawers */}
       <ProductModal product={selectedProduct} onClose={() => setSelectedProduct(null)} />
       
-      <CartDrawer
-        onProceedToMockCheckout={(data) => setActiveCheckoutData(data)}
-      />
-
-      {activeCheckoutData && (
-        <MockStripeCheckout
-          checkoutData={activeCheckoutData}
-          onSuccess={(order) => {
-            setActiveCheckoutData(null);
-            setConfirmedOrder(order);
-            fetchCatalog(); // Refresh catalogue stock counts
-          }}
-          onCancel={() => setActiveCheckoutData(null)}
-        />
-      )}
+      <CartDrawer />
 
       <CheckoutSuccessModal
         order={confirmedOrder}
@@ -211,9 +214,9 @@ export const App: React.FC = () => {
         onViewOrders={() => setIsOrdersOpen(true)}
       />
 
-      {isOrdersOpen && <OrderHistoryModal onClose={() => setIsOrdersOpen(false)} />}
+      {isOrdersOpen && user && <OrderHistoryModal onClose={() => setIsOrdersOpen(false)} />}
 
-      {isAdminOpen && (
+      {isAdminOpen && user?.role === 'admin' && (
         <AdminModal
           onClose={() => setIsAdminOpen(false)}
           onRefreshCatalog={fetchCatalog}

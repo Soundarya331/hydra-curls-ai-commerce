@@ -1,151 +1,37 @@
-# API Documentation: Mini AI E-Commerce Platform
+# API Documentation: NovaStore
 
-The API is built with **FastAPI**, featuring automatic OpenAPI 3.0 schema generation, Swagger UI interactive documentation, and Pydantic validation.
+FastAPI OpenAPI docs: /docs. Base API path: /api.
 
-* **Base URL**: `http://localhost:8000/api`
-* **Interactive Docs (Swagger)**: `http://localhost:8000/docs`
-* **Alternative Docs (ReDoc)**: `http://localhost:8000/redoc`
+## Authentication
 
----
+GET /api/auth/config returns the configured Google Web Client ID for the browser button.
 
-## 1. Authentication Endpoints
+POST /api/auth/google accepts a JSON body with id_token from Google Identity Services. FastAPI verifies signature, audience, expiry and verified email. All users default to customer. Admin role is assigned only when their verified email appears in server-side ADMIN_EMAILS. No client role is accepted.
 
-### `POST /api/auth/google`
-Authenticates a user via Google OAuth ID Token or demo test mode.
+GET /api/auth/me requires a bearer JWT. JWT contains only the user ID; account role is loaded from the database.
 
-#### Request Body (JSON)
-```json
-{
-  "id_token": "optional_google_jwt_id_token",
-  "mock_email": "customer@example.com",
-  "mock_name": "Sarah Jenkins",
-  "mock_role": "customer"
-}
-```
+## Catalog
 
-#### Response (200 OK)
-```json
-{
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "token_type": "bearer",
-  "user": {
-    "id": 2,
-    "email": "customer@example.com",
-    "full_name": "Sarah Jenkins",
-    "avatar_url": "https://api.dicebear.com/...",
-    "role": "customer",
-    "created_at": "2026-09-21T16:15:00Z"
-  }
-}
-```
+GET /api/products supports category, search and in_stock_only filters. GET /api/products/{id} reads one active product.
 
-### `GET /api/auth/me`
-Retrieves current authenticated profile. Requires `Authorization: Bearer <token>`.
+Admin bearer token is required for POST /api/products, PUT /api/products/{id} and DELETE /api/products/{id}. Delete is a soft delete.
 
----
+## Checkout and orders
 
-## 2. Product Catalog Endpoints
+POST /api/checkout/create-session requires a bearer token and a non-empty list of product_id and quantity. It aggregates duplicate product lines, reserves stock with a conditional database update, creates the pending order, and opens Stripe Checkout. Any failure rolls back the reservation. It returns order_id, Stripe session_id, checkout_url and total_amount_cents.
 
-### `GET /api/products`
-Public endpoint to list products with optional filters.
+POST /api/checkout/confirm-payment/{order_id}?session_id=... requires the owning customer. FastAPI retrieves the session from Stripe and verifies its order, session ID, amount, currency, test mode, complete status and paid status before marking it paid.
 
-#### Query Parameters
-* `category` (string, optional): Filter by category (e.g. `Audio`, `Accessories`).
-* `search` (string, optional): Text search matching title or description.
-* `in_stock_only` (bool, optional): If `true`, returns items where `stock_quantity > 0`.
+POST /api/checkout/cancel/{order_id} requires the owner and releases stock only after Stripe confirms that the Checkout Session has expired.
 
-#### Response (200 OK)
-```json
-[
-  {
-    "id": 1,
-    "title": "AeroPro Wireless Noise-Cancelling Headphones",
-    "description": "High-fidelity wireless over-ear headphones...",
-    "category": "Audio",
-    "price_cents": 29999,
-    "stock_quantity": 25,
-    "image_url": "https://images.unsplash.com/photo-1505740420928-5e560c06d30e",
-    "is_active": true,
-    "created_at": "2026-09-21T16:00:00Z",
-    "updated_at": "2026-09-21T16:00:00Z"
-  }
-]
-```
+GET /api/orders/my-orders returns the signed-in user's orders. GET /api/orders/{id} allows the owner or an admin. GET /api/admin/orders and PATCH /api/admin/orders/{id}/status are admin-only. Admin status transitions cannot forge payment.
 
-### `POST /api/products` *(Admin Only)*
-Creates a new product in the catalog. Requires Bearer token with `role: "admin"`. Returns 403 Forbidden for customers.
+## Stripe webhook
 
-### `PUT /api/products/{id}` *(Admin Only)*
-Updates product attributes or stock levels.
+POST /api/webhooks/stripe requires Stripe-Signature verified with STRIPE_WEBHOOK_SECRET and accepts test events only. Session, order, amount and currency are checked. Unique event IDs make retries idempotent. Successful payment does not decrement already reserved stock; expired sessions release it. A failed card payment may still be retried in the same open session.
 
-### `DELETE /api/products/{id}` *(Admin Only)*
-Soft-deletes the product by setting `is_active = false`.
+## AI support
 
----
+POST /api/ai/chat accepts a message and up to 12 user/assistant history messages. Product facts come from database tools. Order status requests require an authenticated token and tools query only that account's orders. Invalid bearer tokens are rejected.
 
-## 3. Orders & Checkout Endpoints
-
-### `POST /api/checkout/create-session`
-Validates stock for cart items, creates an order in `pending` state, and initializes a Stripe Checkout Session.
-
-#### Request Body
-```json
-{
-  "items": [
-    { "product_id": 1, "quantity": 1 },
-    { "product_id": 2, "quantity": 2 }
-  ]
-}
-```
-
-#### Response (200 OK)
-```json
-{
-  "order_id": 3,
-  "session_id": "cs_test_mock_3_59799",
-  "checkout_url": "http://localhost:5173/mock-stripe-checkout?session_id=cs_test_mock_3_59799...",
-  "total_amount_cents": 59799
-}
-```
-
-### `GET /api/orders/my-orders`
-Retrieves authenticated customer's own order history. Enforces strict tenant isolation.
-
-### `GET /api/admin/orders` *(Admin Only)*
-Retrieves all orders across all customers on the platform.
-
-### `PATCH /api/admin/orders/{id}/status` *(Admin Only)*
-Updates order status (`pending`, `paid`, `processing`, `shipped`, `cancelled`).
-
----
-
-## 4. Stripe Webhook Endpoint
-
-### `POST /api/webhooks/stripe`
-Receives asynchronous event webhooks from Stripe:
-* Validates `Stripe-Signature` header against `STRIPE_WEBHOOK_SECRET`.
-* Handles `checkout.session.completed`: updates order to `paid` and atomically decrements inventory stock.
-* Handles `payment_intent.payment_failed`: updates order to `cancelled`.
-
----
-
-## 5. AI Support Agent Endpoint
-
-### `POST /api/ai/chat`
-Interacts with the LangChain / LangGraph AI Support Agent with live database tools.
-
-#### Request Body
-```json
-{
-  "message": "What is the price of AeroPro Wireless headphones?",
-  "conversation_history": []
-}
-```
-
-#### Response (200 OK)
-```json
-{
-  "response": "Here is the current live price and stock information from our catalog:\n\n• AeroPro Wireless Noise-Cancelling Headphones: $299.99 (25 units available) [Category: Audio]\n\nLet me know if you would like to add this to your cart or need more details!",
-  "tools_called": ["get_product_price"]
-}
-```
+The response contains response, tools_called and mode. mode is llm when configured LangChain/OpenAI tool calling succeeds, or basic when database-backed deterministic routing is active without an OpenAI key.

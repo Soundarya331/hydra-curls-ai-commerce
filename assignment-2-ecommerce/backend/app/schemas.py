@@ -1,6 +1,6 @@
 import datetime
-from typing import List, Optional
-from pydantic import BaseModel, EmailStr, Field
+from typing import List, Optional, Literal
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 
 # User Schemas
 class UserBase(BaseModel):
@@ -21,12 +21,8 @@ class UserResponse(UserBase):
 
 # Google Auth
 class GoogleAuthRequest(BaseModel):
-    id_token: Optional[str] = None
-    # For testing/demo mode without live Google client credentials:
-    mock_email: Optional[EmailStr] = None
-    mock_name: Optional[str] = None
-    mock_avatar: Optional[str] = None
-    mock_role: Optional[str] = "customer"
+    model_config = ConfigDict(extra='forbid')
+    id_token: str = Field(min_length=1, max_length=10000)
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -38,7 +34,7 @@ class ProductBase(BaseModel):
     title: str = Field(..., min_length=2, max_length=255)
     description: str
     category: str
-    price_cents: int = Field(..., ge=0, description="Price in cents (e.g. 1999 = $19.99)")
+    price_cents: int = Field(..., ge=50, description="Price in USD cents; minimum 50")
     stock_quantity: int = Field(..., ge=0)
     image_url: Optional[str] = None
     is_active: bool = True
@@ -50,7 +46,7 @@ class ProductUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     category: Optional[str] = None
-    price_cents: Optional[int] = Field(None, ge=0)
+    price_cents: Optional[int] = Field(None, ge=50)
     stock_quantity: Optional[int] = Field(None, ge=0)
     image_url: Optional[str] = None
     is_active: Optional[bool] = None
@@ -66,12 +62,11 @@ class ProductResponse(ProductBase):
 # Order Schemas
 class CartItemRequest(BaseModel):
     product_id: int
-    quantity: int = Field(..., ge=1)
+    quantity: int = Field(..., ge=1, le=100)
 
 class CheckoutSessionRequest(BaseModel):
-    items: List[CartItemRequest]
-    success_url: Optional[str] = None
-    cancel_url: Optional[str] = None
+    model_config = ConfigDict(extra='forbid')
+    items: List[CartItemRequest] = Field(min_length=1, max_length=100)
 
 class OrderItemResponse(BaseModel):
     id: int
@@ -103,13 +98,14 @@ class OrderStatusUpdate(BaseModel):
 
 # AI Chat Schemas
 class ChatMessage(BaseModel):
-    role: str  # 'user' | 'assistant' | 'system'
-    content: str
+    role: Literal['user', 'assistant']
+    content: str = Field(max_length=4000)
 
 class AIChatRequest(BaseModel):
-    message: str
-    conversation_history: Optional[List[ChatMessage]] = []
+    message: str = Field(min_length=1, max_length=4000)
+    conversation_history: List[ChatMessage] = Field(default_factory=list, max_length=12)
 
 class AIChatResponse(BaseModel):
     response: str
     tools_called: Optional[List[str]] = []
+    mode: str = 'basic'

@@ -7,11 +7,12 @@ import { ChatMessage } from '../types';
 const SUGGESTIONS = [
   'What is the price of AeroPro Wireless headphones?',
   'What products are available?',
-  'What is the status of my order #1?',
+  'What is the status of my orders?',
 ];
 
 export const AiChatWidget: React.FC = () => {
   const { token } = useAuth();
+  const [mode, setMode] = useState('Support');
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -53,13 +54,14 @@ export const AiChatWidget: React.FC = () => {
     setIsSending(true);
 
     try {
-      const historyPayload = messages.map((m) => ({
+      const historyPayload = messages.slice(-6).map((m) => ({
         role: m.role,
         content: m.content,
       }));
 
       const res = await api.sendAiMessage(textToSend, historyPayload, token || undefined);
 
+      setMode(res.mode === 'basic' ? 'Basic support (no AI key)' : 'AI support');
       const assistantMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
@@ -75,7 +77,7 @@ export const AiChatWidget: React.FC = () => {
         {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: 'Sorry, I encountered an error connecting to the support agent service.',
+          content: err instanceof Error ? err.message : 'Support is temporarily unavailable.',
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
@@ -96,7 +98,7 @@ export const AiChatWidget: React.FC = () => {
             <Bot className="w-6 h-6" />
             <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-300 rounded-full animate-ping" />
           </div>
-          <span className="font-bold text-xs pr-1">Ask AI Support</span>
+          <span className="font-bold text-xs pr-1">{mode}</span>
         </button>
       )}
 
@@ -202,7 +204,7 @@ export const AiChatWidget: React.FC = () => {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask about products, prices, or orders..."
+              maxLength={4000} placeholder="Ask about products, prices, or orders..."
               className="flex-1 px-3.5 py-2 text-xs bg-slate-100 border border-transparent rounded-xl focus:bg-white focus:border-emerald-500 focus:outline-none transition-all"
             />
             <button

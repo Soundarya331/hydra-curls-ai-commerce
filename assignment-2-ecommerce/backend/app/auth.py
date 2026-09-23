@@ -28,21 +28,25 @@ def verify_google_id_token(token: str) -> dict:
     """
     Verifies Google ID Token against Google Auth public keys.
     """
+    if not settings.GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="Google Sign-In is not configured")
     try:
         id_info = id_token.verify_oauth2_token(
             token,
             google_requests.Request(),
             settings.GOOGLE_CLIENT_ID
         )
+        if not id_info.get('email_verified') or not id_info.get('email') or not id_info.get('sub'):
+            raise ValueError('A verified Google account is required')
         return {
             "email": id_info.get("email"),
             "name": id_info.get("name"),
             "picture": id_info.get("picture"),
         }
-    except Exception as e:
+    except Exception:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Google token verification failed: {str(e)}"
+            detail="Invalid or unverified Google credential"
         )
 
 
@@ -60,7 +64,7 @@ def get_current_user(
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         user_id: str = payload.get("sub")
-        if user_id is None:
+        if not isinstance(user_id, str) or not user_id.isdigit():
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid authentication token payload.",
@@ -85,15 +89,7 @@ def get_optional_current_user(
 ) -> Optional[User]:
     if not credentials:
         return None
-    try:
-        token = credentials.credentials
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        user_id = payload.get("sub")
-        if user_id:
-            return db.query(User).filter(User.id == int(user_id)).first()
-    except Exception:
-        return None
-    return None
+    return get_current_user(credentials, db)
 
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:

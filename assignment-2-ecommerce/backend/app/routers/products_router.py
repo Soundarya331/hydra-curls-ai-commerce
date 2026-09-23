@@ -79,6 +79,8 @@ def update_product(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found.")
     
     update_data = product_in.model_dump(exclude_unset=True)
+    if any(value is None for field, value in update_data.items() if field != 'image_url'):
+        raise HTTPException(422, 'Product fields cannot be null')
     for field, value in update_data.items():
         setattr(product, field, value)
         

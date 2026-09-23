@@ -1,5 +1,5 @@
 import datetime
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, CheckConstraint
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -19,6 +19,7 @@ class User(Base):
 
 class Product(Base):
     __tablename__ = "products"
+    __table_args__ = (CheckConstraint('stock_quantity >= 0'), CheckConstraint('price_cents >= 50'))
 
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(255), index=True, nullable=False)
@@ -37,6 +38,7 @@ class Product(Base):
 
 class Order(Base):
     __tablename__ = "orders"
+    __table_args__ = (CheckConstraint('total_amount_cents >= 50'),)
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
@@ -44,6 +46,8 @@ class Order(Base):
     status = Column(String(50), default="pending", nullable=False, index=True)  # pending, paid, failed, cancelled, shipped
     stripe_session_id = Column(String(255), unique=True, index=True, nullable=True)
     stripe_payment_intent_id = Column(String(255), nullable=True)
+    paid_at = Column(DateTime, nullable=True)
+    payment_error = Column(String(255), nullable=True)
     customer_email = Column(String(255), nullable=False)
     customer_name = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
@@ -56,6 +60,7 @@ class Order(Base):
 
 class OrderItem(Base):
     __tablename__ = "order_items"
+    __table_args__ = (CheckConstraint('quantity > 0'),)
 
     id = Column(Integer, primary_key=True, index=True)
     order_id = Column(Integer, ForeignKey("orders.id"), nullable=False, index=True)
@@ -67,3 +72,12 @@ class OrderItem(Base):
     # Relationships
     order = relationship("Order", back_populates="items")
     product = relationship("Product", back_populates="order_items")
+
+
+class StripeEvent(Base):
+    """Stripe event IDs are unique for provider replay protection."""
+    __tablename__ = 'stripe_events'
+    id = Column(Integer, primary_key=True)
+    event_id = Column(String(255), unique=True, nullable=False, index=True)
+    event_type = Column(String(120), nullable=False)
+    received_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)

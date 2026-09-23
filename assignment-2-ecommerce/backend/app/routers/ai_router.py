@@ -32,5 +32,6 @@ def chat_with_support_agent(
 
     return AIChatResponse(
         response=result["response"],
-        tools_called=result.get("tools_called", [])
+        tools_called=result.get("tools_called", []),
+        mode=result.get('mode', 'basic')
     )

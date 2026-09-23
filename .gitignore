@@ -19,3 +19,11 @@ build/
 Thumbs.db
 .vscode/
 .idea/
+.review-tools/
+.local-postgres/
+.test-postgres/
+.pytest_cache/
+*.tsbuildinfo
+*.log
+playwright-report/
+test-results/

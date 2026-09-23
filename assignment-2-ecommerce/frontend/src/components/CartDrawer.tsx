@@ -4,19 +4,10 @@ import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 
-interface CartDrawerProps {
-  onProceedToMockCheckout: (checkoutData: {
-    order_id: number;
-    session_id: string;
-    checkout_url: string;
-    total_amount_cents: number;
-  }) => void;
-}
-
-export const CartDrawer: React.FC<CartDrawerProps> = ({ onProceedToMockCheckout }) => {
+export const CartDrawer: React.FC = () => {
   const { isCartOpen, setIsCartOpen, items, updateQuantity, removeFromCart, cartTotalCents, clearCart } =
     useCart();
-  const { user, token, loginDemo } = useAuth();
+  const { user, token } = useAuth();
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -27,7 +18,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ onProceedToMockCheckout 
 
     // Require authentication
     if (!token || !user) {
-      setErrorMsg('Please sign in or select a demo profile to continue checkout.');
+      setErrorMsg('Please sign in with Google to continue checkout.');
       return;
     }
 
@@ -42,14 +33,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ onProceedToMockCheckout 
 
       const res = await api.createCheckoutSession(payload, token);
 
-      // If backend generated a Stripe live URL (starts with https://checkout.stripe.com), redirect
-      if (res.checkout_url.startsWith('https://checkout.stripe.com')) {
-        window.location.href = res.checkout_url;
-      } else {
-        // Mock Stripe test checkout modal for local review
-        setIsCartOpen(false);
-        onProceedToMockCheckout(res);
-      }
+      window.location.assign(res.checkout_url);
     } catch (err: any) {
       setErrorMsg(err.message || 'Checkout failed. Please check stock availability.');
     } finally {
@@ -86,17 +70,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ onProceedToMockCheckout 
               <AlertCircle className="w-4 h-4 flex-shrink-0 text-rose-500 mt-0.5" />
               <div className="flex-1">
                 <p>{errorMsg}</p>
-                {!user && (
-                  <button
-                    onClick={() => {
-                      loginDemo('customer');
-                      setErrorMsg(null);
-                    }}
-                    className="mt-1 font-bold underline text-rose-800"
-                  >
-                    Quick Sign-In as Sarah (Customer)
-                  </button>
-                )}
+
               </div>
             </div>
           )}

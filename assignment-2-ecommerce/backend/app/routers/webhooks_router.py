@@ -1,65 +1,60 @@
-import json
 import stripe
-from fastapi import APIRouter, Request, Header, HTTPException, Depends, status
+from fastapi import APIRouter, Request, Header, HTTPException, Depends
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-
 from app.config import settings
 from app.database import get_db
-from app.services.stripe_service import process_successful_payment, process_failed_payment
+from app.models import Order, StripeEvent
+from app.services.stripe_service import (
+    process_successful_payment, release_reservation, validate_session, locked_order,
+)
 
-router = APIRouter(prefix="/webhooks", tags=["Webhooks"])
+router = APIRouter(prefix='/webhooks', tags=['Webhooks'])
 
-@router.post("/stripe")
-async def stripe_webhook_handler(
-    request: Request,
-    stripe_signature: str = Header(None, alias="Stripe-Signature"),
-    db: Session = Depends(get_db)
-):
-    """
-    Stripe Webhook Receiver:
-    1. Validates webhook signature using STRIPE_WEBHOOK_SECRET.
-    2. Listens for `checkout.session.completed` and `payment_intent.payment_failed`.
-    3. Triggers order status update & stock reduction.
-    """
-    payload = await request.body()
 
-    # If secret is live, verify cryptographic signature
-    if settings.STRIPE_WEBHOOK_SECRET and not settings.STRIPE_WEBHOOK_SECRET.startswith("whsec_mock"):
-        try:
-            event = stripe.Webhook.construct_event(
-                payload, stripe_signature, settings.STRIPE_WEBHOOK_SECRET
-            )
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid payload")
-        except stripe.error.SignatureVerificationError:
-            raise HTTPException(status_code=400, detail="Invalid signature")
-    else:
-        # Development / mock parser
-        try:
-            event = json.loads(payload.decode("utf-8"))
-        except Exception:
-            raise HTTPException(status_code=400, detail="Could not parse webhook JSON payload")
-
-    event_type = event.get("type")
-    data_object = event.get("data", {}).get("object", {})
-
-    if event_type == "checkout.session.completed":
-        session_id = data_object.get("id")
-        order_id_str = data_object.get("client_reference_id") or data_object.get("metadata", {}).get("order_id")
-        payment_intent_id = data_object.get("payment_intent")
-
-        if order_id_str:
-            order_id = int(order_id_str)
-            process_successful_payment(
-                db=db,
-                order_id=order_id,
-                session_id=session_id,
-                payment_intent_id=payment_intent_id
-            )
-
-    elif event_type == "payment_intent.payment_failed":
-        order_id_str = data_object.get("metadata", {}).get("order_id")
-        if order_id_str:
-            process_failed_payment(db=db, order_id=int(order_id_str))
-
-    return {"status": "success", "event_type": event_type}
+@router.post('/stripe')
+async def stripe_webhook_handler(request: Request,
+    stripe_signature: str = Header(None, alias='Stripe-Signature'),
+    db: Session = Depends(get_db)):
+    if not settings.STRIPE_WEBHOOK_SECRET or 'mock' in settings.STRIPE_WEBHOOK_SECRET:
+        raise HTTPException(503, 'Stripe webhook is not configured')
+    try:
+        event = stripe.Webhook.construct_event(
+            await request.body(), stripe_signature, settings.STRIPE_WEBHOOK_SECRET)
+    except (ValueError, stripe.SignatureVerificationError):
+        raise HTTPException(400, 'Invalid Stripe webhook signature or payload')
+    if event.get('livemode') is not False:
+        raise HTTPException(400, 'Only Stripe test events are supported')
+    kind = event['type']
+    data = event['data']['object']
+    # Persist the provider ID in the same database transaction as the state transition.
+    # A savepoint makes concurrent webhook deliveries safe under the unique constraint.
+    try:
+        with db.begin_nested():
+            db.add(StripeEvent(event_id=event['id'], event_type=kind))
+            db.flush()
+    except IntegrityError:
+        return {'status': 'success', 'duplicate': True}
+    if kind.startswith('checkout.session.'):
+        order = db.query(Order).filter(Order.stripe_session_id == data.get('id')).first()
+        if not order:
+            # Retry: the webhook can arrive before checkout transaction commits.
+            raise HTTPException(503, 'Checkout order is not available yet')
+        validate_session(order, data)
+        if kind in ('checkout.session.completed', 'checkout.session.async_payment_succeeded'):
+            if data.get('payment_status') == 'paid':
+                process_successful_payment(db, order.id, data)
+        elif kind == 'checkout.session.expired' and data.get('status') == 'expired':
+            release_reservation(db, order.id)
+        elif kind == 'checkout.session.async_payment_failed':
+            release_reservation(db, order.id, 'failed')
+    elif kind == 'payment_intent.payment_failed':
+        order_id = data.get('metadata', {}).get('order_id', '')
+        if str(order_id).isdigit():
+            order = locked_order(db, int(order_id))
+            if not order.paid_at and order.status == 'pending':
+                # Card declines can be retried in the same Checkout Session.
+                order.payment_error = 'Payment declined. Retry checkout or cancel the order.'
+                db.commit()
+    db.commit()
+    return {'status': 'success'}
